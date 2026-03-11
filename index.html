@@ -38,7 +38,7 @@
             <div>
                 <div class="flex items-center space-x-3 mb-2">
                     <div class="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></div>
-                    <span id="grade-badge" class="text-[10px] font-bold text-blue-500 uppercase tracking-widest tracking-[0.2em]">Detecting...</span>
+                    <span id="grade-badge" class="text-[10px] font-bold text-blue-500 uppercase tracking-widest tracking-[0.2em]">Syncing...</span>
                 </div>
                 <h1 id="folder-name" class="text-4xl md:text-5xl font-black text-white mb-3 italic tracking-tighter">Loading...</h1>
                 <p id="folder-desc" class="text-slate-400 max-w-xl text-sm leading-relaxed">
@@ -64,9 +64,10 @@
             <h3 class="text-xl font-bold text-slate-500">No resources found</h3>
             <p class="text-slate-600 text-sm mb-6">The current directory on GitHub is empty or the path is mismatched.</p>
             <div id="debug-info" class="text-[10px] text-slate-500 font-mono bg-black/40 p-4 rounded-xl inline-block text-left border border-white/5">
-                <p class="font-bold text-blue-400 mb-1">TECHNICIAN DEBUG CONSOLE:</p>
+                <p class="font-bold text-blue-400 mb-1 uppercase tracking-widest">Technician Debug Console:</p>
                 <p id="debug-repo">Repo: Detecting...</p>
                 <p id="debug-path">Path: Detecting...</p>
+                <p id="debug-url" class="mt-2 text-[8px] text-slate-600 truncate max-w-xs"></p>
             </div>
         </div>
 
@@ -106,60 +107,66 @@
             const crumb = document.getElementById('current-crumb');
             const badge = document.getElementById('grade-badge');
             const sourceLink = document.getElementById('source-link');
+            const debugRepo = document.getElementById('debug-repo');
+            const debugPath = document.getElementById('debug-path');
+            const debugURL = document.getElementById('debug-url');
 
             grid.innerHTML = '';
             loader.classList.remove('hidden');
             errorContainer.classList.add('hidden');
             document.getElementById('empty-state').classList.add('hidden');
 
-            // 1. DYNAMIC REPOSITORY DETECTION
+            // 1. IMPROVED REPOSITORY DETECTION
+            // On GitHub Pages, the first segment after the domain is ALWAYS the repo name.
             const pathSegments = window.location.pathname.split('/').filter(s => s && s !== 'index.html');
             
-            // Search for "Grade-X" anywhere in the path
+            // Logic: The first segment that starts with "Grade-" is our target repo
             const repoSegment = pathSegments.find(s => s.toLowerCase().startsWith('grade-'));
             const repoIndex = repoSegment ? pathSegments.indexOf(repoSegment) : -1;
             
             if (repoIndex !== -1) {
                 currentRepo = pathSegments[repoIndex];
             } else {
-                // LOCAL FALLBACK: Look for the parent folder name if running on PC
+                // FALLBACK: If we can't find it in the URL (testing locally), 
+                // we check the folder name of the current file.
                 currentRepo = pathSegments.length > 0 ? pathSegments[0] : "Grade-12-LS-Physics-Resources"; 
             }
 
             // 2. PATH RESOLUTION
-            let segments = repoIndex !== -1 ? pathSegments.slice(repoIndex + 1) : pathSegments;
+            // Subpath is everything after the repository name
+            let segments = repoIndex !== -1 ? pathSegments.slice(repoIndex + 1) : [];
             
-            // Handle cases where segments might be empty (root view)
-            if (segments.length === 0 && pathSegments.length > 0 && repoIndex === -1) {
-                segments = pathSegments;
-            }
-
             const currentPath = segments.map(s => decodeURIComponent(s)).join('/');
             const displayTitle = segments.length > 0 ? decodeURIComponent(segments[segments.length - 1]).replace(/-/g, ' ') : "Class Portal";
 
-            // Update UI State
+            // Update UI
             titleElement.innerText = displayTitle;
             crumb.innerText = displayTitle;
             badge.innerText = currentRepo.replace(/-/g, ' ');
             sourceLink.href = `https://github.com/${repoOwner}/${currentRepo}`;
+            
+            // Update Debug info
+            debugRepo.innerText = `Target Repo: ${currentRepo}`;
+            debugPath.innerText = `Target Path: "${currentPath}"`;
+            debugURL.innerText = window.location.href;
 
             const depth = segments.length;
             rootLink.href = depth > 0 ? "../".repeat(depth) + "index.html" : "index.html";
 
-            // 3. API EXECUTION
+            // 3. API FETCH
             const cacheBuster = force ? `&t=${Date.now()}` : '';
             const apiUrl = `https://api.github.com/repos/${repoOwner}/${currentRepo}/contents/${currentPath}?ref=main${cacheBuster}`;
 
             try {
                 const response = await fetch(apiUrl);
-                if (response.status === 403) throw new Error("GitHub API rate limit exceeded. Please wait 60 seconds.");
-                if (!response.ok) throw new Error(`Could not find path: "${currentPath}" on GitHub.`);
+                if (response.status === 403) throw new Error("API rate limit exceeded. Please wait 60 seconds.");
+                if (!response.ok) throw new Error(`Path not found on GitHub API.`);
 
                 allItems = await response.json();
                 loader.classList.add('hidden');
                 
                 if (!Array.isArray(allItems) || allItems.length === 0) {
-                    showEmpty(currentRepo, currentPath);
+                    document.getElementById('empty-state').classList.remove('hidden');
                 } else {
                     renderItems(allItems, currentRepo, currentPath);
                 }
@@ -169,14 +176,8 @@
                 errorText.innerText = error.message;
                 errorDebug.innerText = `Requested: ${apiUrl}`;
                 errorContainer.classList.remove('hidden');
-                showEmpty(currentRepo, currentPath);
+                document.getElementById('empty-state').classList.remove('hidden');
             }
-        }
-
-        function showEmpty(repo, path) {
-            document.getElementById('empty-state').classList.remove('hidden');
-            document.getElementById('debug-repo').innerText = `Target Repo: ${repo}`;
-            document.getElementById('debug-path').innerText = `API Path: "${path}"`;
         }
 
         function renderItems(items, repo, path) {
@@ -189,7 +190,7 @@
             });
 
             if (visibleItems.length === 0) {
-                showEmpty(repo, path);
+                document.getElementById('empty-state').classList.remove('hidden');
                 return;
             }
 
