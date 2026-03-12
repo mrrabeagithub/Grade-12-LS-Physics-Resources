@@ -62,8 +62,8 @@
         <!-- States -->
         <div id="empty-state" class="hidden text-center py-24 glass rounded-3xl border-dashed border-slate-700">
             <i class="fas fa-folder-open text-4xl text-slate-700 mb-4"></i>
-            <h3 class="text-xl font-bold text-slate-500">Directory Synchronizing</h3>
-            <p class="text-slate-600 text-sm mb-8">No files found. Ensure the GitHub folder name matches exactly.</p>
+            <h3 id="empty-state-title" class="text-xl font-bold text-slate-500">Directory Synchronizing</h3>
+            <p id="empty-state-desc" class="text-slate-600 text-sm mb-8">No files found. Ensure the GitHub folder name matches exactly.</p>
             
             <!-- DEBUG CONSOLE FOR THE TECHNICIAN -->
             <div id="debug-info" class="text-[10px] text-slate-400 font-mono bg-black/40 p-5 rounded-2xl inline-block text-left border border-white/10 max-w-full">
@@ -132,8 +132,18 @@
 
             // 2. RESOLVE SUBPATH (Handling decoding for spaces/ampersands)
             let segments = repoIndex !== -1 ? pathSegments.slice(repoIndex + 1) : [];
+            
+            // If local and empty segments, try grabbing Chapter prefix
+            if (segments.length === 0 && repoIndex === -1) {
+                const chapIdx = pathSegments.findIndex(s => s.toLowerCase().includes('chapter-'));
+                if (chapIdx !== -1) segments = pathSegments.slice(chapIdx);
+            }
+
             const decodedSegments = segments.map(s => decodeURIComponent(s));
             const currentPath = decodedSegments.join('/');
+            
+            // ENCODE PATH FOR SAFE API REQUESTS
+            const apiPath = decodedSegments.map(s => encodeURIComponent(s)).join('/');
             
             const rawFolderName = decodedSegments[decodedSegments.length - 1] || 'Class Portal';
             const cleanFolderName = rawFolderName.replace(/-/g, ' ');
@@ -151,16 +161,48 @@
             const depth = segments.length;
             rootLink.href = depth > 0 ? "../".repeat(depth) + "index.html" : "index.html";
 
-            // 3. API FETCH
-            const cacheBuster = force ? `&t=${Date.now()}` : '';
-            const apiUrl = `https://api.github.com/repos/${repoOwner}/${currentRepo}/contents/${currentPath}?ref=main${cacheBuster}`;
+            // 3. API FETCH WITH SESSION CACHING
+            const baseApiUrl = `https://api.github.com/repos/${repoOwner}/${currentRepo}/contents/${apiPath}?ref=main`;
+            const cacheKey = `physics_portal_cache_${baseApiUrl}`;
 
             try {
-                const response = await fetch(apiUrl);
-                if (response.status === 403) throw new Error("API Limit Reached. Wait 60s.");
+                // Check cache first if not a forced refresh
+                if (!force) {
+                    const cachedData = sessionStorage.getItem(cacheKey);
+                    if (cachedData) {
+                        const parsedCache = JSON.parse(cachedData);
+                        // Cache validity: 5 minutes (300,000 ms)
+                        if (Date.now() - parsedCache.timestamp < 300000) {
+                            allItems = parsedCache.data;
+                            loader.classList.add('hidden');
+                            
+                            if (!Array.isArray(allItems) || allItems.length === 0) {
+                                document.getElementById('empty-state').classList.remove('hidden');
+                            } else {
+                                renderItems(allItems, currentRepo, currentPath);
+                            }
+                            return; // Exit early, successfully used cache
+                        }
+                    }
+                }
+
+                // If no valid cache or force refresh, hit the API
+                const cacheBuster = force ? `&t=${Date.now()}` : '';
+                const response = await fetch(baseApiUrl + cacheBuster);
+                
+                if (response.status === 403 || response.status === 429) {
+                    throw new Error("GitHub API rate limit exceeded (60 req/hr). Please wait a few minutes, or browse previously visited folders.");
+                }
                 if (!response.ok) throw new Error(`GitHub Directory not found.`);
 
                 allItems = await response.json();
+                
+                // Save to Session Storage
+                sessionStorage.setItem(cacheKey, JSON.stringify({
+                    timestamp: Date.now(),
+                    data: allItems
+                }));
+
                 loader.classList.add('hidden');
                 
                 if (!Array.isArray(allItems) || allItems.length === 0) {
@@ -172,7 +214,7 @@
             } catch (error) {
                 loader.classList.add('hidden');
                 errorText.innerText = error.message;
-                document.getElementById('error-debug').innerText = `API Endpoint: ${apiUrl}`;
+                document.getElementById('error-debug').innerText = `API Endpoint: ${baseApiUrl}`;
                 errorContainer.classList.remove('hidden');
                 document.getElementById('empty-state').classList.remove('hidden');
             }
@@ -189,6 +231,9 @@
 
             if (visibleItems.length === 0) {
                 document.getElementById('empty-state').classList.remove('hidden');
+                // Contextual Empty State
+                document.getElementById('empty-state-title').innerText = "Folder is Ready";
+                document.getElementById('empty-state-desc').innerText = "No physics resources detected here yet. Upload your PDFs, HTML Sims, or Images to GitHub.";
                 return;
             }
 
