@@ -130,7 +130,7 @@
             // Fix for URL Encoding (%20, &) and hyphen formatting
             const decodedSegments = segments.map(s => decodeURIComponent(s));
             const currentPath = decodedSegments.join('/');
-            const rawFolderName = decodedSegments[decodedSegments.length - 1] || 'Grade 12 GS Physics Portal';
+            const rawFolderName = decodedSegments[decodedSegments.length - 1] || 'Grade 12 Physics Portal';
             const cleanFolderName = rawFolderName.replace(/-/g, ' ');
             
             titleElement.innerText = cleanFolderName;
@@ -259,3 +259,4 @@
 </body>
 
 </html>
+
